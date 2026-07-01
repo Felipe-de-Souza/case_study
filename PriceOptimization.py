@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[2]:
+# In[1]:
 
 
 #############################################################################################################
@@ -22,7 +22,7 @@
 
 # #### Libraries that will be used in this code
 
-# In[3]:
+# In[2]:
 
 
 import warnings
@@ -41,7 +41,7 @@ from scipy import stats
 
 # #### Importing the Excel with raw data
 
-# In[4]:
+# In[3]:
 
 
 # Loading each sheet from the shared Case Study Data
@@ -57,7 +57,7 @@ for sheet_name, df in all_sheets.items():
 
 # #### Treating the data
 
-# In[5]:
+# In[4]:
 
 
 print("Product_Retailer_Data")
@@ -74,7 +74,7 @@ print("File size deduped: %s" %(df_Slope_Groups['PRODUCT_ID'].count()))
 
 # #### Determining Product Importance
 
-# In[6]:
+# In[5]:
 
 
 """Importance is built per category, otherwise you will compare slow selling categories with high selling. 
@@ -87,21 +87,54 @@ In the end, only hig selling would get the price investment"""
 df_temp = df_Product_Retailer_Data.copy()
 
 
-# In[7]:
+# ##### Bringuing the Slop attributes to main df
+
+# In[6]:
 
 
-#### Refining the Slope Idea as a df
+# #### Refining the Slope Idea as a df
 df_temp = pd.merge(df_temp,df_Slope_Groups[['PRODUCT_ID', 'IS_ANCHOR','ANCHOR_PRODUCT_ID',
                                            'MIN_MAP_PER_UNIT_RATIO', 'MAX_MAP_PER_UNIT_RATIO']], 
                    on = 'PRODUCT_ID', how = 'left')
 
-df_temp2 = df_temp[['PRODUCT_ID', 'RETAILER', 'L52W_MAP']]
-df_temp2.rename(columns={'L52W_MAP': 'AnchorPromoPrice'}, inplace=True)
-df_temp = pd.merge(df_temp,df_temp2, on = ['PRODUCT_ID', 'RETAILER'], how = 'left')
-df_temp.head()
+# df_temp2 = df_temp[['PRODUCT_ID', 'RETAILER', 'L52W_MAP']]
+# #df_temp2.rename(columns={'L52W_MAP': 'AnchorPromoPrice'}, inplace=True)
+# df_temp = pd.merge(df_temp,df_temp2, on = ['PRODUCT_ID', 'RETAILER'], how = 'left')
+# df_temp.head()
 
+
+# In[7]:
+
+
+df_temp['ActualMapPErUnit'] = df_temp['L52W_MAP']/df_temp['SIZE_VALUE']
+
+
+# ##### FInding the MAP Anchor and bring to each correspondent in Slop_group
 
 # In[8]:
+
+
+###### FInding the MAP Anchor and bring to each correspondent in Slop_group
+Slope_group_leader = df_temp.query("IS_ANCHOR == 'YES'")[['RETAILER','SLOPE_GROUP','ActualMapPErUnit','L52W_MAP']]
+Slope_group_leader = Slope_group_leader.rename(columns={'ActualMapPErUnit': 'ActualMapPErUnit_ANCHOR', 'L52W_MAP': 'AnchorPromoPrice'})
+df_temp = pd.merge(df_temp,Slope_group_leader, on =['RETAILER','SLOPE_GROUP'], how = 'left' )
+
+
+# In[9]:
+
+
+df_temp['ActualSlope'] = df_temp['ActualMapPErUnit']/df_temp['ActualMapPErUnit_ANCHOR']
+
+
+# In[10]:
+
+
+df_temp.query("SLOPE_GROUP == 'ADVIL_CAPLET_SLOPE' and RETAILER == 'Walmart Corp-RMA'").head()
+
+
+# #### Product Importance
+
+# In[11]:
 
 
 df_temp['Units'] = df_temp['L52W_VOLUME']
@@ -140,16 +173,17 @@ df_temp['Product_Imp_Score'] = \
 df_temp[['Units', 'Margin_Retailer', 'Margin_Manufact']]\
                                         .apply(lambda x: Product_Score(*x), axis=1)
 
-df_temp['Product_Imp_Score2'] = df_temp['Units']+df_temp['Margin_Manufact']+df_temp['Margin_Retailer']
+
+df_temp['List_Product_Imp_Score2'] = 3 - (df_temp['Units']+df_temp['Margin_Manufact']+df_temp['Margin_Retailer'])
 
 
-# In[9]:
+# In[12]:
 
 
 df_temp.query("CATEGORY == 'ANALGESICS'").sort_values(by='Product_Imp_Score', ascending=False).head(5)
 
 
-# In[10]:
+# In[13]:
 
 
 ### Print Example of CATEGORY = 'ANALGESICS'
@@ -157,15 +191,22 @@ sns.scatterplot(data=df_temp.query("CATEGORY == 'ANALGESICS'"), x='Margin_Manufa
 plt.show()
 
 
+# In[ ]:
+
+
+
+
+
 # ### Determining best Pricing Strategy (balance matrix) given the elasticity + product Importance
 
-# In[11]:
+# In[14]:
 
 
 #Elasticity Cut-Off per Category
-
+global Elasticity_Cutoff
+global Product_Imp_Score_Cutoff
 Elasticity_Cutoff = df_temp['OWN_PRICE_ELASTICITY'].quantile(0.5)
-Product_Imp_Score_Cutoff = 1.2
+Product_Imp_Score_Cutoff = 1.9
 def BalanceMatrix(Importance, Elasticity):
 
     if Importance > Product_Imp_Score_Cutoff and Elasticity < Elasticity_Cutoff:
@@ -181,24 +222,65 @@ def BalanceMatrix(Importance, Elasticity):
 
     return PP_Reco_EN
 
-df_temp['Price_Strategy'] = df_temp[['Product_Imp_Score2','OWN_PRICE_ELASTICITY']]\
+df_temp['Price_Strategy'] = df_temp[['List_Product_Imp_Score2','OWN_PRICE_ELASTICITY']]\
                                     .apply(lambda x: BalanceMatrix(*x), axis=1)
 
 
 # ##### Creating the metrics that we will use as % of for the constraints
 
-# In[12]:
+# In[ ]:
 
 
-df_temp['ActualManufactMargin'] = (df_temp['L52W_LIST_PRICE']-df_temp['COGS'])*df_temp['L52W_VOLUME']
-df_temp['ActualManufactSales'] = (df_temp['L52W_LIST_PRICE'])*df_temp['L52W_VOLUME']
-df_temp['RetailSales'] = (df_temp['L52W_BASE_PRICE'])*df_temp['L52W_VOLUME']
-df_temp['ActualRetailtMargin'] = (df_temp['L52W_BASE_PRICE']-df_temp['L52W_LIST_PRICE'])*df_temp['L52W_VOLUME']
+
+
+
+# In[15]:
+
+
+df_temp['Price_Group_Retailer'] = df_temp['PRICE_GROUP'] + "_" + df_temp['RETAILER'] 
+
+
+# In[16]:
+
+
+df_temp.columns
+
+
+# In[17]:
+
+
+Price_Group_Retailer = df_temp.pivot_table(
+    index=["Price_Group_Retailer"],
+    values=['L52W_LIST_PRICE','List_Product_Imp_Score2'],
+    aggfunc={
+        "L52W_LIST_PRICE": np.mean,'List_Product_Imp_Score2': np.mean
+    },
+    margins=False,
+).reset_index(drop=False).rename(columns={'L52W_LIST_PRICE': 'LIST_GROUP_Proxy_PRICE',\
+                                          'List_Product_Imp_Score2': 'GROUP_Proxy_Product_Imp'})
+Price_Group_Retailer.head()
+
+
+# In[18]:
+
+
+global df_temp2
+df_temp2 = pd.merge(df_temp,Price_Group_Retailer, on = 'Price_Group_Retailer', how = 'inner')
+df_temp2.head()
+
+
+# In[19]:
+
+
+df_temp2['ActualManufactMargin'] = (df_temp2['L52W_LIST_PRICE']-df_temp2['COGS'])*df_temp2['L52W_VOLUME']
+df_temp2['ActualManufactSales'] = (df_temp2['L52W_LIST_PRICE'])*df_temp2['L52W_VOLUME']
+df_temp2['RetailSales'] = (df_temp2['L52W_BASE_PRICE'])*df_temp2['L52W_VOLUME']
+df_temp2['ActualRetailtMargin'] = (df_temp2['L52W_BASE_PRICE']-df_temp2['L52W_LIST_PRICE'])*df_temp2['L52W_VOLUME']
 
 
 # ### Price Optimizer
 
-# In[13]:
+# In[20]:
 
 
 """This optimization problem is a nonlinear programming (NLP) model with nonlinear objective and constraints due 
@@ -209,38 +291,46 @@ df_temp['ActualRetailtMargin'] = (df_temp['L52W_BASE_PRICE']-df_temp['L52W_LIST_
    scipy.optimize.minimize using either the trust-constr or SLSQP method."""
 
 
-# In[27]:
+# In[21]:
 
 
 def PriceOptimizer(scenario,OptVariable,PriceVariationMin,PriceVariationMax, C1_Units_Variation, C3_Manufact_Sales_Var, \
-                   C4_Manufact_Margin_Var,C5_EachRetailer_Margin_Var,C6_Each_Retailer_Toward_25,\
-                   ProductImportanceInclination, MinInclination, Optmethod):
+                        C4_Manufact_Margin_Var,C5_EachRetailer_Margin_Var,C6_Each_Retailer_Toward_25,\
+                        ProductImportanceInclination, MinInclination, Optmethod):
 
     global FinalDF
     global df
     global ModelParameters
+    global df_temp2
+    global Product_Imp_Score_Cutoff
+
+    #### Defining the model parameters from user defined variables
 
     print("Running Scenario: %s" %(scenario))
     print("")
-    InvestmentMax = (-1)*df_temp['ActualManufactMargin'].sum()*C4_Manufact_Margin_Var
-    SalesVarMax = (-1)*df_temp['ActualManufactSales'].sum()*C3_Manufact_Sales_Var
+    InvestmentMax = (-1)*df_temp2['ActualManufactMargin'].sum()*C4_Manufact_Margin_Var
+    SalesVarMax = (-1)*df_temp2['ActualManufactSales'].sum()*C3_Manufact_Sales_Var
     OptVariable = 'Margin'
     DiscountMin = 100+PriceVariationMin
     DiscountMax = 100+PriceVariationMax
     INCL = ProductImportanceInclination
     MinInclination  = MinInclination
-    UnitsGtZero=df_temp['L52W_VOLUME'].sum()*C1_Units_Variation
+    UnitsGtZero=df_temp2['L52W_VOLUME'].sum()*C1_Units_Variation
     Optmethod=Optmethod #SLSQP #COBYLA #'trust-constr'
 
-    WMT_Max_Investment = df_temp.query("RETAILER == 'Walmart Corp-RMA'")['ActualRetailtMargin'].sum()*C5_EachRetailer_Margin_Var
-    TGT_Max_Investment = df_temp.query("RETAILER == 'Target Corp-RMA'")['ActualRetailtMargin'].sum()*C5_EachRetailer_Margin_Var
-    CVS_Max_Investment = df_temp.query("RETAILER == 'CVS Corp-RMA'")['ActualRetailtMargin'].sum()*C5_EachRetailer_Margin_Var
-    ALB_Max_Investment = df_temp.query("RETAILER == 'Albertsons Corp-RMA'")['ActualRetailtMargin'].sum()*C5_EachRetailer_Margin_Var
-    KRG_Max_Investment = df_temp.query("RETAILER == 'Kroger Corp-RMAA'")['ActualRetailtMargin'].sum()*C5_EachRetailer_Margin_Var
+    #### Defining the model parameters from user defined variables
 
-    df = df_temp.copy()
+    WMT_Max_Investment = df_temp2.query("RETAILER == 'Walmart Corp-RMA'")['ActualRetailtMargin'].sum()*C5_EachRetailer_Margin_Var
+    TGT_Max_Investment = df_temp2.query("RETAILER == 'Target Corp-RMA'")['ActualRetailtMargin'].sum()*C5_EachRetailer_Margin_Var
+    CVS_Max_Investment = df_temp2.query("RETAILER == 'CVS Corp-RMA'")['ActualRetailtMargin'].sum()*C5_EachRetailer_Margin_Var
+    ALB_Max_Investment = df_temp2.query("RETAILER == 'Albertsons Corp-RMA'")['ActualRetailtMargin'].sum()*C5_EachRetailer_Margin_Var
+    KRG_Max_Investment = df_temp2.query("RETAILER == 'Kroger Corp-RMAA'")['ActualRetailtMargin'].sum()*C5_EachRetailer_Margin_Var
+
+    df = df_temp2.copy()
     df['Prod_Imp_CutOff'] = Product_Imp_Score_Cutoff
     df['Prod_Imp_CutOff2'] = Product_Imp_Score_Cutoff
+
+    #### S-Curve: A function of the Slop Group Avg Price, prod importance and max and min discounts
     def SCurve(Member_Imp, Member_imp_Cut, Actual_Price):
 
         S_Price_Temp = "((((({DiscountMin} - {DiscountMax}) / (1 + np.exp((" + str(float(Member_Imp - Member_imp_Cut)) \
@@ -250,118 +340,149 @@ def PriceOptimizer(scenario,OptVariable,PriceVariationMin,PriceVariationMax, C1_
                       (1 + np.exp(((Member_Imp - Member_imp_Cut)*INCL))) + DiscountMax)*((Actual_Price))))/100) 
         return pd.Series((S_Price,S_Price_Temp))
 
-
-    df[['S_Price1','S_Price_Temp1']] = \
-    df[['Product_Imp_Score','Prod_Imp_CutOff','L52W_LIST_PRICE']].apply(lambda x: SCurve(*x), axis=1)
-
     df[['S_Price2','S_Price_Temp2']] = \
-    df[['Product_Imp_Score2','Prod_Imp_CutOff2','L52W_LIST_PRICE']].apply(lambda x: SCurve(*x), axis=1)
+    df[['GROUP_Proxy_Product_Imp','Prod_Imp_CutOff2','LIST_GROUP_Proxy_PRICE']].apply(lambda x: SCurve(*x), axis=1)
 
-    df['S_Discount1'] =  df['S_Price1']/df['L52W_LIST_PRICE'] -1
-    df['S_Discount2'] =  df['S_Price2']/df['L52W_LIST_PRICE'] -1
-    df['S_Discount2'] = df['S_Discount2']*(-1)
-    df = df.sort_values(by='Product_Imp_Score2', ascending=False)
-    area = df['Units'].astype('float')
-    x = df['Product_Imp_Score2'].astype('float')
-    y = df['S_Discount2'].astype('float')
-    Disc_max = df['S_Discount1'].max()+0.01
-    Disc_min = df['S_Discount1'].min()-0.01
+    df['S_Discount2'] =  df['S_Price2']/df['LIST_GROUP_Proxy_PRICE'] -1
 
-    ax = sns.scatterplot(data=df, x='Product_Imp_Score2', y='S_Discount2', size='Units', sizes=(20, 500))
-    ax.invert_xaxis()
+    data = df.pivot_table(
+        index=["Price_Group_Retailer"],
+        values=['S_Discount2','Units','GROUP_Proxy_Product_Imp'],
+        aggfunc={
+            "S_Discount2": np.mean,'Units': np.sum,'GROUP_Proxy_Product_Imp': np.mean 
+        },
+        margins=False,
+    ).reset_index(drop=False)
+
+    data = data.sort_values(by='GROUP_Proxy_Product_Imp', ascending=True)
+
+    ax = sns.scatterplot(data=data, x='GROUP_Proxy_Product_Imp', y='S_Discount2', size='Units', sizes=(20, 500))
+    #ax.invert_xaxis()
     print("Ideal S-Surve, with no constraints or optimization")
     plt.show()
-    print("")
 
-    def MarginBestPrice(Regular_Cost, Units_non_Promo, Regular_Price,Elasticity,retail_base_price,BP_LP_Ratio):
+    ### Defining the most important Equations
+
+    def MarginBestPrice(Regular_Cost, Units_non_Promo, Regular_Price,Elasticity,\
+                        retail_base_price,BP_LP_Ratio,LIST_GROUP_Proxy_PRICE,PromoRatio,SIZE_VALUE):
 
         x = Symbol("x")
         z = Symbol("z")
 
-        UnitsVar = (((Units_non_Promo + (Units_non_Promo*(((x*BP_LP_Ratio)/retail_base_price) -1)*(Elasticity))) - Units_non_Promo))
+        GroupDiscount =  x/LIST_GROUP_Proxy_PRICE -1
+        New_LP = Regular_Price*(1+GroupDiscount)
+        New_BP = New_LP*BP_LP_Ratio
+        New_MAP = New_BP*PromoRatio
+
+        New_MAP_per_Unit = New_MAP/SIZE_VALUE
+
+        UnitsVar = (((Units_non_Promo + (Units_non_Promo*(((New_LP*BP_LP_Ratio)/retail_base_price) -1)*(Elasticity))) - Units_non_Promo))
 
         TotalUnits = (Units_non_Promo + \
-                      Units_non_Promo*(((x*BP_LP_Ratio)/retail_base_price) -1)*(Elasticity))
+                      Units_non_Promo*(((New_LP*BP_LP_Ratio)/retail_base_price) -1)*(Elasticity))
 
         CostNew = ((Units_non_Promo + \
-                      Units_non_Promo*((x/Regular_Price) -1)*(Elasticity))*Regular_Cost)
+                      Units_non_Promo*((New_LP/Regular_Price) -1)*(Elasticity))*Regular_Cost)
 
-        NewSales = ((Units_non_Promo + Units_non_Promo*((x/Regular_Price) -1)*(Elasticity))*x) - \
+        NewSales = ((Units_non_Promo + Units_non_Promo*((New_LP/Regular_Price) -1)*(Elasticity))*New_LP) - \
                     (Units_non_Promo*Regular_Price)
 
         TotalMargin = ((((Units_non_Promo + \
-                      Units_non_Promo*((x/Regular_Price) -1)*(Elasticity))*x) - \
+                      Units_non_Promo*((New_LP/Regular_Price) -1)*(Elasticity))*New_LP) - \
                         ((Units_non_Promo + \
-                      Units_non_Promo*((x/Regular_Price) -1)*(Elasticity))*Regular_Cost)) \
+                      Units_non_Promo*((New_LP/Regular_Price) -1)*(Elasticity))*Regular_Cost)) \
                        - ((Units_non_Promo*Regular_Price) - (Units_non_Promo*Regular_Cost)))
 
         retailer_margin_var = ((((Units_non_Promo + \
-                      Units_non_Promo*(((x*BP_LP_Ratio)/retail_base_price) -1)*(Elasticity))*(x*BP_LP_Ratio)) - \
+                      Units_non_Promo*(((New_LP*BP_LP_Ratio)/retail_base_price) -1)*(Elasticity))*(New_LP*BP_LP_Ratio)) - \
                         ((Units_non_Promo + \
-                      Units_non_Promo*(((x*BP_LP_Ratio)/retail_base_price) -1)*(Elasticity))*Regular_Price)) \
+                      Units_non_Promo*(((New_LP*BP_LP_Ratio)/retail_base_price) -1)*(Elasticity))*Regular_Price)) \
                        - ((Units_non_Promo*retail_base_price) - (Units_non_Promo*Regular_Price)))
 
-        #retailer_margin_var = ((Units_non_Promo*((x*BP_LP_Ratio) - x)) - (Units_non_Promo*(retail_base_price - Regular_Price)))
+        #retailer_margin_var = ((Units_non_Promo*((New_LP*BP_LP_Ratio) - New_LP)) - (Units_non_Promo*(retail_base_price - Regular_Price)))
 
         retailer_margin_var_pct = ((((Units_non_Promo + \
-                      Units_non_Promo*(((x*BP_LP_Ratio)/retail_base_price) -1)*(Elasticity))*(x*BP_LP_Ratio)) - \
+                      Units_non_Promo*(((New_LP*BP_LP_Ratio)/retail_base_price) -1)*(Elasticity))*(New_LP*BP_LP_Ratio)) - \
                         ((Units_non_Promo + \
-                      Units_non_Promo*(((x*BP_LP_Ratio)/retail_base_price) -1)*(Elasticity))*Regular_Price)) \
+                      Units_non_Promo*(((New_LP*BP_LP_Ratio)/retail_base_price) -1)*(Elasticity))*Regular_Price)) \
                        / ((Units_non_Promo*retail_base_price) - (Units_non_Promo*Regular_Price)))
 
         PriceBase = Regular_Price
-        NewPrice = x
+        NewPrice = New_LP
 
-        PriceVar = (x/Regular_Price -1)
+        PriceVar = (New_LP/Regular_Price -1)
 
-        return pd.Series((TotalMargin, UnitsVar, NewSales, TotalUnits,PriceBase,NewPrice,retailer_margin_var,retailer_margin_var_pct,PriceVar))
+        return pd.Series((TotalMargin, UnitsVar, NewSales, TotalUnits,PriceBase,NewPrice,\
+                          retailer_margin_var,retailer_margin_var_pct,PriceVar, 
+                          New_LP, New_BP, New_MAP,New_MAP_per_Unit))
 
     df['BP_LP_Ratio'] = (df['L52W_BASE_PRICE']/df['L52W_LIST_PRICE'])
     df['PromoRatio'] = (df['L52W_MAP']/df['L52W_BASE_PRICE'])
 
-    df[['FxMarginVar', 'FxUnitsVar', 'FxSales', 'FxUnits','FxBasePrice','FxNewPrice','FxRetailerMarginVar','Fxretailer_margin_var_pct','FxPriceVar']] = \
-    df[['COGS', 'L52W_VOLUME', 'L52W_LIST_PRICE','OWN_PRICE_ELASTICITY','L52W_BASE_PRICE','BP_LP_Ratio']]\
+    df[['FxMarginVar', 'FxUnitsVar', 'FxSales', 'FxUnits','FxBasePrice','FxNewPrice','FxRetailerMarginVar',\
+        'Fxretailer_margin_var_pct','FxPriceVar','FxNewLP','FxNewBP', 'FxNewMAP','FxNew_MAP_per_Unit']] = \
+    df[['COGS', 'L52W_VOLUME', 'L52W_LIST_PRICE','OWN_PRICE_ELASTICITY',\
+        'L52W_BASE_PRICE','BP_LP_Ratio','LIST_GROUP_Proxy_PRICE','PromoRatio','SIZE_VALUE']]\
     .apply(lambda x: MarginBestPrice(*x), axis=1)
 
     df['Sales'] = df['L52W_VOLUME']*df['L52W_BASE_PRICE']
     Totals = df['Sales'].sum()
     df["SPD_PCT"] = df['Sales']/Totals
 
-    def Equations(S_CPI, Member_Imp, Member_imp_Cut, Competitor_Price, \
+    def Equations(S_Price, Member_Imp, Member_imp_Cut, Competitor_Price, \
                    Regular_Price, Regular_Cost, SPD_PCT, FxMarginVar,\
-                   FxUnitsVar,FxSales,FxUnits,FxBasePrice,FxNewPrice,FxRetailerMarginVar,\
-                   Fxretailer_margin_var_pct,FxPriceVar):
+                   FxUnitsVar,FxSales,FxUnits,FxNewBP,FxNewLP,FxRetailerMarginVar,\
+                   Fxretailer_margin_var_pct,FxPriceVar,FxNewMAP,FxNew_MAP_per_Unit):
 
-        Fx_final = str(FxMarginVar).replace("x", str(S_CPI))
+        Fx_final = str(FxMarginVar).replace("x", str(S_Price))
 
-        Fx_final2 = str(FxUnitsVar).replace("x", str(S_CPI))
+        Fx_final2 = str(FxUnitsVar).replace("x", str(S_Price))
 
-        Fx_final4 = str(FxSales).replace("x", str(S_CPI))
+        Fx_final4 = str(FxSales).replace("x", str(S_Price))
 
-        Fx_final5 = str(FxUnits).replace("x", str(S_CPI))
+        Fx_final5 = str(FxUnits).replace("x", str(S_Price))
 
-        Fx_final6 = str(FxBasePrice)
+        Fx_final6 = str(FxNewBP).replace("x", str(S_Price))
+        Fx_final6b = str(FxNewMAP).replace("x", str(S_Price))
+        Fx_final6c = str(FxNew_MAP_per_Unit).replace("x", str(S_Price))
+        # Fx_final6d = str(FxNew_MAP_per_Unit_ANCHOR).replace("x", str(S_Price))
+        # Fx_final6e = str(FxNewMAP_ANCHOR).replace("x", str(S_Price))
+        Fx_final7 = str(FxNewLP).replace("x", str(S_Price))
 
-        Fx_final7 = str(FxNewPrice).replace("x", str(S_CPI))
+        Fx_final8 = str(FxRetailerMarginVar).replace("x", str(S_Price))
 
-        Fx_final8 = str(FxRetailerMarginVar).replace("x", str(S_CPI))
+        Fx_final9 = str(Fxretailer_margin_var_pct).replace("x", str(S_Price))
 
-        Fx_final9 = str(Fxretailer_margin_var_pct).replace("x", str(S_CPI))
+        PriceVariance = str(FxPriceVar).replace("x", str(S_Price)) 
 
-        PriceVariance = str(FxPriceVar).replace("x", str(S_CPI)) 
+        CostRatio = "(((" + S_Price + "/" + str(float(Regular_Cost)) + ") - 1))"
 
-        CostRatio = "(((" + S_CPI + "/" + str(float(Regular_Cost)) + ") - 1))"
-
-        return pd.Series((PriceVariance,CostRatio,Fx_final,Fx_final2,Fx_final4,Fx_final5,Fx_final6,Fx_final7,Fx_final8,Fx_final9))
+        return pd.Series((PriceVariance,CostRatio,Fx_final,Fx_final2,Fx_final4,\
+                          Fx_final5,Fx_final6,Fx_final6b,Fx_final6c,Fx_final7,Fx_final8,Fx_final9))
 
     df[['PriceVariance','CostRatio', 'Fx_final', 'Fx_final2', 'Fx_final4','Fx_final5',\
-        'Fx_final6','Fx_final7','Fx_final8', 'Fx_final9']] = \
-    df[['S_Price_Temp2', 'Product_Imp_Score2','Prod_Imp_CutOff', \
+        'Fx_final6','Fx_final6b','Fx_final6c','Fx_final7','Fx_final8', 'Fx_final9']] = \
+    df[['S_Price_Temp2', 'List_Product_Imp_Score2','Prod_Imp_CutOff', \
                     'L52W_LIST_PRICE','L52W_LIST_PRICE',\
                     'COGS','SPD_PCT','FxMarginVar', \
-                    'FxUnitsVar','FxSales', 'FxUnits','FxBasePrice','FxNewPrice',\
-                    'FxRetailerMarginVar','Fxretailer_margin_var_pct','FxPriceVar']].apply(lambda x: Equations(*x), axis=1)
-    df['Price_Retailer'] = df['PRICE_GROUP'] + "_" + df['RETAILER']
+                    'FxUnitsVar','FxSales', 'FxUnits','FxNewBP','FxNewLP',\
+                    'FxRetailerMarginVar','Fxretailer_margin_var_pct',\
+                     'FxPriceVar','FxNewMAP','FxNew_MAP_per_Unit']].apply(lambda x: Equations(*x), axis=1)
+
+    df['Price_Retailer'] = df['PRICE_GROUP'] + "_" + df['RETAILER'] 
+    df['prod_retailer'] = df['PRODUCT_ID'] + "_" + df['RETAILER']
+
+    ###### FInding the MAP Anchor and bring to each correspondent in Slop_group
+    Slope_group_leader = df.query("IS_ANCHOR == 'YES'")[['RETAILER','SLOPE_GROUP','Fx_final6b','Fx_final6c']]
+    Slope_group_leader = Slope_group_leader.rename(columns={'Fx_final6b': 'Fx_final6d',\
+                                                           'Fx_final6c': 'Fx_final6e'})
+    df = pd.merge(df,Slope_group_leader, on =['RETAILER','SLOPE_GROUP'], how = 'left' )
+
+    df.query("SLOPE_GROUP == 'ADVIL_CAPLET_SLOPE' and RETAILER == 'Walmart Corp-RMA'").head(10).to_csv("test.csv")
+
+    df['FxNew_MAP_per_Unit_SLOPE'] = "(" + df['Fx_final6c'] + ")/(" + df['Fx_final6e'] + ")"
+
+    # Since it's an optimizer of all items, below is the Summ of all rows stil in the equation form
 
     Final_Eq = ""
     Final_Eq2 = ""
@@ -483,18 +604,14 @@ def PriceOptimizer(scenario,OptVariable,PriceVariationMin,PriceVariationMax, C1_
         except:
             pass
 
-    # Final_WMT2 = "(" + Final_WMT2 + " + )/" + str(WMTCounter)
-    # Final_TGT2 = "(" + Final_TGT2 + " + )/" + str(TGTCounter)
-    # Final_KRG2 = "(" + Final_KRG2 + " + )/" + str(ALBCounter)
-    # Final_ALB2 = "(" + Final_ALB2 + " + )/" + str(CVSCounter)
-    # Final_CVS2 = "(" + Final_CVS2 + " + )/" + str(KRGCounter)
-
     if OptVariable == 'UnitSales':
         Equation = Final_Eq4
     elif OptVariable == 'Margin':
         Equation = Final_Eq  
     elif OptVariable == 'Sales':
         Equation = Final_Eq6
+
+    ### Objective function with the soft rules
 
     def objective(x):  
 
@@ -534,7 +651,7 @@ def PriceOptimizer(scenario,OptVariable,PriceVariationMin,PriceVariationMax, C1_
 
 
             if violation < 0:
-                objective = objective + 3*violation
+                objective = objective + 2*violation
             #if violationb > 0:
                 #objective = objective + 1000*violationb
 
@@ -544,7 +661,7 @@ def PriceOptimizer(scenario,OptVariable,PriceVariationMin,PriceVariationMax, C1_
         penalty4 = 0.0
 
         if violation1 < 0:
-            penalty1 = 10*(violation1) # Large scaling weight
+            penalty1 = 1000*(violation1) # Large scaling weight
 
         if violation2 < 0:
             penalty2 = 4*(violation2) # Large scaling weight
@@ -555,6 +672,36 @@ def PriceOptimizer(scenario,OptVariable,PriceVariationMin,PriceVariationMax, C1_
         objective = (objective + penalty1 + penalty2 + penalty4)
 
         return (-1)*objective
+
+    def MAP_Constraint(x):
+
+        def MAPCHECK(MinSlope, MaxSlope,IS_ANCHOR,NewSlopeFx):
+
+            try:
+                NewSlope = eval(NewSlopeFx.format(DiscountMin=x[0], DiscountMax=x[1], INCL=x[2]))
+                if IS_ANCHOR != "YES":
+                    if NewSlope > MaxSlope or NewSlope < MinSlope:
+                        Violation = 1
+                    else:
+                        Violation = 0
+                else:
+                    Violation = 0
+
+                return Violation 
+
+            except:
+                Violation = 0
+                return Violation
+
+        df['Violation'] = \
+        df[['MIN_MAP_PER_UNIT_RATIO', 'MAX_MAP_PER_UNIT_RATIO','IS_ANCHOR', 'FxNew_MAP_per_Unit_SLOPE']].apply(lambda x: MAPCHECK(*x), axis=1)
+
+        FinalViolation = df['Violation'].sum()
+
+        #print(FinalViolation)
+
+        return -FinalViolation  + 60 
+
 
     def prices_are_equal(x):
 
@@ -601,6 +748,9 @@ def PriceOptimizer(scenario,OptVariable,PriceVariationMin,PriceVariationMax, C1_
     def Inclination_constraint(x):
         return x[2] - MinInclination  
 
+    def Inclination_constraintMax(x):
+        return (-1)*x[2] + 5  
+
     def price_variance_constraint(x):
 
         BasePrice = (eval(Final_Eq8.format(DiscountMin=x[0], DiscountMax=x[1], INCL=x[2])))
@@ -638,14 +788,18 @@ def PriceOptimizer(scenario,OptVariable,PriceVariationMin,PriceVariationMax, C1_
     minPriceVar = {'type': 'ineq', 'fun': minPriceVar_constraint}
     inclinationVar = {'type': 'ineq', 'fun': Inclination_constraint}
     priceVarmatch = {'type': 'ineq', 'fun': prices_are_equal}
+    inclinationMax = {'type': 'ineq', 'fun': Inclination_constraintMax}
+    MAP_CHECK = {'type': 'ineq', 'fun': MAP_Constraint}
 
     #Default Constraints
     #pricevar
-    cons = [pricevar,
-            maxPriceVar,
+    cons = [maxPriceVar,
             minPriceVar,
-           inclinationVar]
+            inclinationVar,
+            inclinationMax,
+            MAP_CHECK]
 
+    #inclinationVar, pricevar
     print("Ready to run the model")
 
     if Optmethod == 'SLSQP':
@@ -706,37 +860,38 @@ def PriceOptimizer(scenario,OptVariable,PriceVariationMin,PriceVariationMax, C1_
     CostRatio = eval(Final_Eq3.format(DiscountMin=globals()[X_f][0], DiscountMax=globals()[X_f][1], INCL=globals()[X_f][2]))
     print('\033[0mAVG Cost Ratio (Price/Cost -1):\033[1m %{:0,.2f}'.format(CostRatio))
 
-    df_temp2 = df
+    OptimizedDf = df
+
     def objective(MarginVar,UnitsVar,SalesVar):  
-        DiscountMin = int(globals()[X_f][0])
-        DiscountMax = int(globals()[X_f][1])
-        INCL = float(globals()[X_f][2])
+        DiscountMinx = float(globals()[X_f][0])
+        DiscountMaxX = float(globals()[X_f][1])
+        INCLX= float(globals()[X_f][2])
+        return pd.Series((eval(MarginVar.format(DiscountMin=DiscountMinx, DiscountMax=DiscountMaxX, INCL=INCLX)),
+                             eval(UnitsVar.format(DiscountMin=DiscountMinx, DiscountMax=DiscountMaxX, INCL=INCLX)),
+                             eval(SalesVar.format(DiscountMin=DiscountMinx, DiscountMax=DiscountMaxX, INCL=INCLX))))
+
+
+    OptimizedDf[['Expected_Margin_Var','Expected_Units_Var','Expected_Sales_Var']] = \
+    OptimizedDf[['Fx_final','Fx_final2','Fx_final4']].apply(lambda x: objective(*x), axis=1)
+
+    def objective(New_Map_per_Unit, New_Anchor_MAP_per_unit, FxNewMAP_ANCHOR,NewSlope):  
+        DiscountMinx = float(globals()[X_f][0])
+        DiscountMaxX = float(globals()[X_f][1])
+        INCLX= float(globals()[X_f][2])
         try:
-            return pd.Series((eval(MarginVar.format(DiscountMin=DiscountMin, DiscountMax=DiscountMax, INCL=INCL)),
-                             eval(UnitsVar.format(DiscountMin=DiscountMin, DiscountMax=DiscountMax, INCL=INCL)),
-                             eval(SalesVar.format(DiscountMin=DiscountMin, DiscountMax=DiscountMax, INCL=INCL))))
+            return pd.Series((eval(New_Map_per_Unit.format(DiscountMin=DiscountMinx, DiscountMax=DiscountMaxX, INCL=INCLX)),
+                             eval(New_Anchor_MAP_per_unit.format(DiscountMin=DiscountMinx, DiscountMax=DiscountMaxX, INCL=INCLX)),
+                              eval(FxNewMAP_ANCHOR.format(DiscountMin=DiscountMinx, DiscountMax=DiscountMaxX, INCL=INCLX)),
+                             eval(NewSlope.format(DiscountMin=DiscountMinx, DiscountMax=DiscountMaxX, INCL=INCLX))))
         except:
             pass
 
-    df_temp2[['Expected_Margin_Var','Expected_Units_Var','Expected_Sales_Var']] = \
-    df_temp2[['Fx_final','Fx_final2','Fx_final4']].apply(lambda x: objective(*x), axis=1)
+    OptimizedDf[['New_Map_per_Unit', 'New_Anchor_MAP_per_unit','New_Map_ANCHOR', "NewSlope"]] = \
+    OptimizedDf[['Fx_final6c', 'Fx_final6e', 'Fx_final6d', 'FxNew_MAP_per_Unit_SLOPE']].apply(lambda x: objective(*x), axis=1)
 
-    # def objective(MarginVar,UnitsVar,SalesVar):  
-    #     DiscountMin = int(globals()[X_f][0])
-    #     DiscountMax = int(globals()[X_f][1])
-    #     INCL = float(globals()[X_f][2])
-    #     try:
-    #         return eval(UnitsVar.format(DiscountMin=DiscountMin, DiscountMax=DiscountMax, INCL=INCL))
-    #     except:
-    #         pass
-
-    # df_temp2['Expected_Units_Var'] = \
-    # df_temp2[['Fx_final','Fx_final2','Fx_final4']].apply(lambda x: objective(*x), axis=1)
-
-
-    DiscountMin = int((globals()[X_f][0]))
-    DiscountMax = int((globals()[X_f][1]))
-    INCL = (globals()[X_f][2])
+    DiscountMin = float((globals()[X_f][0]))
+    DiscountMax = float((globals()[X_f][1]))
+    INCL = float(globals()[X_f][2])
 
     def SCurve(Member_Imp, Member_imp_Cut, Actual_Price):
 
@@ -745,30 +900,98 @@ def PriceOptimizer(scenario,OptVariable,PriceVariationMin,PriceVariationMax, C1_
         return pd.Series((S_Price))
 
 
-    df_temp2[['S_Price_Final']] = \
-    df_temp2[['Product_Imp_Score2','Prod_Imp_CutOff2','L52W_LIST_PRICE']].apply(lambda x: SCurve(*x), axis=1)
+    OptimizedDf[['S_Price_Final']] = \
+    OptimizedDf[['GROUP_Proxy_Product_Imp','Prod_Imp_CutOff2','LIST_GROUP_Proxy_PRICE']].apply(lambda x: SCurve(*x), axis=1)
 
-    df2 = df_temp2[['PRODUCT_ID','RETAILER','Product_Imp_Score2', 'Price_Strategy',\
+    OptimizedDf['Price_Variation'] =  OptimizedDf['S_Price_Final']/OptimizedDf['LIST_GROUP_Proxy_PRICE'] -1
+
+    OptimizedDf['Suggested_LP'] = (1+OptimizedDf['Price_Variation'])*OptimizedDf['L52W_LIST_PRICE']
+    OptimizedDf['Suggested_BP'] = OptimizedDf['Suggested_LP']*OptimizedDf['BP_LP_Ratio']
+    OptimizedDf['Suggested_MAP'] = OptimizedDf['Suggested_BP']*OptimizedDf['PromoRatio']
+
+    OptimizedDf.query("SLOPE_GROUP == 'ADVIL_CAPLET_SLOPE' and RETAILER == 'Walmart Corp-RMA'")\
+        [['SLOPE_GROUP','RETAILER','SIZE_VALUE','L52W_BASE_PRICE', 'L52W_LIST_PRICE', 'L52W_MAP',\
+          'Suggested_LP', 'Suggested_BP', 'Suggested_MAP', 'ActualMapPErUnit','New_Map_per_Unit',\
+          'AnchorPromoPrice','ActualMapPErUnit_ANCHOR','New_Map_ANCHOR','New_Anchor_MAP_per_unit',"NewSlope",\
+          'MIN_MAP_PER_UNIT_RATIO', 'MAX_MAP_PER_UNIT_RATIO']].head(10)
+
+    DiscountMin = float((globals()[X_f][0]))
+    DiscountMax = float((globals()[X_f][1]))
+    INCL = float(globals()[X_f][2])
+
+    def SCurve(Member_Imp, Member_imp_Cut, Actual_Price):
+
+        S_Price = (((((DiscountMin - DiscountMax) / \
+                      (1 + np.exp(((Member_Imp - Member_imp_Cut)*INCL))) + DiscountMax)*((Actual_Price))))/100) 
+        return pd.Series((S_Price))
+
+
+    OptimizedDf[['S_Price_Final']] = \
+    OptimizedDf[['GROUP_Proxy_Product_Imp','Prod_Imp_CutOff2','LIST_GROUP_Proxy_PRICE']].apply(lambda x: SCurve(*x), axis=1)
+
+
+    OptimizedDf2 = OptimizedDf[['PRODUCT_ID','RETAILER','List_Product_Imp_Score2', 'Price_Strategy',\
                     'Expected_Margin_Var','Expected_Units_Var','Expected_Sales_Var',\
-                    'S_Price_Final','BP_LP_Ratio','PromoRatio','S_Discount2']]
-    df3 = pd.merge(df_Product_Retailer_Data,df2,on = ['PRODUCT_ID','RETAILER'], how = 'inner')
+                    'S_Price_Final','BP_LP_Ratio','PromoRatio','S_Discount2',\
+                    'LIST_GROUP_Proxy_PRICE','GROUP_Proxy_Product_Imp','Price_Group_Retailer',\
+                   'Suggested_LP', 'Suggested_BP', 'Suggested_MAP', 'ActualMapPErUnit','New_Map_per_Unit',\
+          'AnchorPromoPrice','ActualMapPErUnit_ANCHOR','New_Map_ANCHOR','New_Anchor_MAP_per_unit',"NewSlope",\
+          'MIN_MAP_PER_UNIT_RATIO', 'MAX_MAP_PER_UNIT_RATIO']]
 
-    df3['Suggested_LP'] = df3['S_Price_Final']
-    df3['Suggested_BP'] = df3['S_Price_Final']*df3['BP_LP_Ratio']
-    df3['Suggested_MAP'] = df3['Suggested_BP']*df3['PromoRatio']
+    OptimizedDf3 = pd.merge(df_Product_Retailer_Data,OptimizedDf2,on = ['PRODUCT_ID','RETAILER'], how = 'inner')
 
-    df3['Price_Variation'] =  df3['S_Price_Final']/df3['L52W_LIST_PRICE'] -1
-    df3['scenario'] = scenario
-    data = df3
+    OptimizedDf3['Price_Variation'] =  OptimizedDf3['S_Price_Final']/OptimizedDf3['LIST_GROUP_Proxy_PRICE'] -1
+
+    OptimizedDf3['scenario'] = scenario
+
+    data = OptimizedDf3
     data['Price_Variation'] = data['Price_Variation']
 
-    data = data.sort_values(by='Price_Variation', ascending=True)
-    ax = sns.scatterplot(data=data, x='Product_Imp_Score2', y='Price_Variation', size='L52W_VOLUME', sizes=(20, 500))
-    ax.invert_xaxis()
+    data = data.pivot_table(
+        index=["Price_Group_Retailer"],
+        values=['Price_Variation','L52W_VOLUME','GROUP_Proxy_Product_Imp','OWN_PRICE_ELASTICITY'],
+        aggfunc={
+            "Price_Variation": np.mean,'L52W_VOLUME': np.sum,'GROUP_Proxy_Product_Imp': np.mean, 'OWN_PRICE_ELASTICITY': np.mean
+        },
+        margins=False,
+    ).reset_index(drop=False)
+
+    data = data.sort_values(by='GROUP_Proxy_Product_Imp', ascending=False)
+
+    ax = sns.scatterplot(data=data, x='GROUP_Proxy_Product_Imp', y='Price_Variation', size='L52W_VOLUME', sizes=(20, 500))
+    #ax.invert_xaxis()
     print("Final S-Surve, with with the optimizer and constraints")
     plt.show()
 
-    FinalDF = FinalDF._append(df3,ignore_index=True)
+    #Elasticity Cut-Off per At Price Group - Retailer Level
+
+    data = data.rename(columns={'OWN_PRICE_ELASTICITY': 'Price_Group_Elasticity'})
+
+    Elasticity_Cutoff = data['Price_Group_Elasticity'].quantile(0.5)
+    Product_Imp_Score_Cutoff = 1.9
+    def BalanceMatrix(Importance, Elasticity):
+
+        if Importance < Product_Imp_Score_Cutoff and Elasticity < Elasticity_Cutoff:
+            PP_Reco_EN = 'High Elast + Price Investment Room'
+        elif Importance < Product_Imp_Score_Cutoff and Elasticity >= Elasticity_Cutoff:
+            PP_Reco_EN = 'Low Elast + Price Investment Room'
+        elif Importance >= Product_Imp_Score_Cutoff and Elasticity < Elasticity_Cutoff:
+            PP_Reco_EN =  'High Elast + No Price Investment Room'
+        elif Importance >= Product_Imp_Score_Cutoff and Elasticity >= Elasticity_Cutoff:
+            PP_Reco_EN = 'Low Elast + No Price Investment Room'
+        else:
+            PP_Reco_EN = 'N/A'
+
+        return PP_Reco_EN
+
+    data['Price_Strategy_Price_Group'] = data[['GROUP_Proxy_Product_Imp','Price_Group_Elasticity']]\
+                                        .apply(lambda x: BalanceMatrix(*x), axis=1)
+    data = data[['Price_Group_Retailer','Price_Strategy_Price_Group','Price_Group_Elasticity']]
+
+    OptimizedDf3 = pd.merge(OptimizedDf3,data, on = 'Price_Group_Retailer', how = 'inner' )
+    print("")
+
+    FinalDF = FinalDF._append(OptimizedDf3,ignore_index=True)
 
     data = [[scenario,OptVariable,PriceVariationMin,PriceVariationMax, C1_Units_Variation, C3_Manufact_Sales_Var,\
            C4_Manufact_Margin_Var, C5_EachRetailer_Margin_Var, C6_Each_Retailer_Toward_25, ProductImportanceInclination,\
@@ -779,10 +1002,9 @@ def PriceOptimizer(scenario,OptVariable,PriceVariationMin,PriceVariationMax, C1_
 
     ModelParameters = ModelParameters._append(ModelParametersTemp,ignore_index=True)
     print("")
-    return
 
 
-# In[28]:
+# In[22]:
 
 
 global FinalDF
@@ -791,7 +1013,7 @@ FinalDF = pd.DataFrame()
 ModelParameters = pd.DataFrame()
 
 
-# In[29]:
+# In[23]:
 
 
 PriceOptimizer(scenario = "1 - Following the Brief Specs Model Type: SLSQP",
@@ -803,8 +1025,8 @@ PriceOptimizer(scenario = "1 - Following the Brief Specs Model Type: SLSQP",
                C4_Manufact_Margin_Var = 0.03,
                C5_EachRetailer_Margin_Var = 0.02,
                C6_Each_Retailer_Toward_25 = 0.25,
-               ProductImportanceInclination = 2,
-               MinInclination = 1,
+               ProductImportanceInclination = 5,
+               MinInclination = 2.5,
                Optmethod='SLSQP' )
 
 PriceOptimizer(scenario = "2 - Similar to 1 but allowing 25% price var Model Type: SLSQP",
@@ -816,8 +1038,8 @@ PriceOptimizer(scenario = "2 - Similar to 1 but allowing 25% price var Model Typ
                C4_Manufact_Margin_Var = 0.03,
                C5_EachRetailer_Margin_Var = 0.02,
                C6_Each_Retailer_Toward_25 = 0.25,
-               ProductImportanceInclination = 2,
-               MinInclination = -5,
+               ProductImportanceInclination = 5,
+               MinInclination = 2.5,
                Optmethod='SLSQP' )
 
 PriceOptimizer(scenario = "3 - Similar to 2 but less aggressive on Business Constraints Model Type: SLSQP",
@@ -829,8 +1051,8 @@ PriceOptimizer(scenario = "3 - Similar to 2 but less aggressive on Business Cons
                C4_Manufact_Margin_Var = 0.01,
                C5_EachRetailer_Margin_Var = 0.01,
                C6_Each_Retailer_Toward_25 = 0.5,
-               ProductImportanceInclination = 2,
-               MinInclination = -5,
+               ProductImportanceInclination = 5,
+               MinInclination = 2.5,
                Optmethod='SLSQP' )
 
 PriceOptimizer(scenario = "4 - Similar to 3 but almost no Business Constraints Model Type: SLSQP",
@@ -842,26 +1064,13 @@ PriceOptimizer(scenario = "4 - Similar to 3 but almost no Business Constraints M
                C4_Manufact_Margin_Var = 0.00,
                C5_EachRetailer_Margin_Var = 0.00,
                C6_Each_Retailer_Toward_25 = 0.75,
-               ProductImportanceInclination = 2,
-               MinInclination = -5,
+               ProductImportanceInclination = 5,
+               MinInclination = 2.5,
                Optmethod='SLSQP' )
 #SLSQP #COBYLA #'trust-constr'#
 
 FinalDF.to_csv("OptimizedPrices.csv")
 ModelParameters.to_csv("ModelParameters.csv")
-
-
-# In[30]:
-
-
-FinalDF.to_csv("OptimizedPrices.csv")
-ModelParameters.to_csv("ModelParameters.csv")
-
-
-# In[31]:
-
-
-FinalDF.head()
 
 
 # In[ ]:
